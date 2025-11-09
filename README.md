@@ -14,7 +14,7 @@
 
 ## 🚀 快速开始
 
-### 1. 安装依赖
+### 1. 安装依赖（必需）
 
 ```bash
 # 创建虚拟环境
@@ -44,7 +44,7 @@ cp .env.example .env
 - `OPENAI_KEYS` 设置后：仅白名单中的 key 可访问 API
 - API Key 仅用于访问控制，不映射到特定账号
 
-### 3. 启动服务
+### 3. 启动 API 服务
 
 ```bash
 python -m uvicorn app:app --reload --port 8000
@@ -54,20 +54,105 @@ python -m uvicorn app:app --reload --port 8000
 - 🏠 Web 控制台：http://localhost:8000/
 - 💚 健康检查：http://localhost:8000/healthz
 
-## 📖 使用指南
+## 🌐 公网部署
 
-### 账号管理
+### 方案一：Cloudflare Tunnel 内网穿透（推荐）⭐
 
-#### 方式一：Web 控制台（推荐）
+**优势**：完全免费 | 无需公网IP | 自动HTTPS | 3分钟部署
 
-访问 http://localhost:8000/ 使用可视化界面管理账号：
-- 查看所有账号及状态
-- 创建/删除/编辑账号
-- 启用/禁用账号
-- 刷新 Token
-- URL 登录（设备授权）
+**快速开始：**
 
-#### 方式二：REST API
+```bash
+# 1. 下载 cloudflared
+# Windows: https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
+# 重命名为 cloudflared.exe 并放到项目目录
+
+# 2. 配置 API 密钥
+双击运行：配置API密钥.bat
+
+# 3. 一键部署
+双击运行：一键部署_Cloudflare.bat
+```
+
+**获取公网地址：**
+```
+终端显示：https://abc-def-ghi.trycloudflare.com
+这就是你的公网 API 地址！
+```
+
+**客户端配置：**
+```python
+import openai
+
+client = openai.OpenAI(
+    base_url="https://abc-def-ghi.trycloudflare.com/v1",
+    api_key="sk-790214"  # 你在 .env 中设置的密钥
+)
+
+response = client.chat.completions.create(
+    model="claude-sonnet-4.5",
+    messages=[{"role": "user", "content": "你好"}]
+)
+```
+
+### 方案二：其他部署方式
+
+详细部署文档：**`部署说明.txt`** 和 **`快速部署指南.txt`**
+
+包含以下方案：
+- 🔧 路由器端口转发
+- ☁️ 云服务器部署（阿里云/腾讯云/AWS）
+- 🐳 Docker 部署
+- 🔒 Nginx 反向代理 + HTTPS
+- 🌍 Ngrok 内网穿透
+
+## 🤖 自动注册（全新功能）
+
+### 方式一：全自动注册（推荐）⭐
+
+**一键自动注册 Amazon Q 账号！**
+
+```bash
+# 单个注册
+双击：开始注册.bat
+
+# 批量注册（5个账号）
+双击：批量注册.bat
+
+# 或使用命令行
+python amazonq_auto_register.py
+python 批量注册.py
+```
+
+**自动化流程（16步）：**
+1. ✅ 自动生成随机邮箱、姓名、密码
+2. ✅ Chrome 无痕模式自动化
+3. ✅ 自动填写所有表单（逐字符输入）
+4. ✅ 自动获取邮箱验证码
+5. ✅ 自动完成 AWS 授权
+6. ✅ 自动添加账号到数据库
+
+**技术特性：**
+- 参考 cursorregester2.0 项目实现
+- DrissionPage 4.1+ 无头浏览器自动化
+- 邮箱 API 集成（https://mail.qjhvip.top）
+- URL 登录流程（设备授权）
+- 完全自动化，无需人工干预
+
+**依赖安装：**
+```bash
+pip install DrissionPage requests
+```
+
+### 方式二：Web 控制台 URL 登录
+
+访问 http://localhost:8000/ 使用可视化界面：
+1. 找到"URL 登录（5分钟超时）"区域
+2. 点击"开始登录"
+3. 在浏览器中完成 AWS 登录
+4. 点击"等待授权并创建账号"
+
+### 方式三：REST API 手动创建
 
 **创建账号**
 ```bash
@@ -211,14 +296,17 @@ print(response.choices[0].message.content)
 ├── app.py                          # FastAPI 主应用
 ├── auth_flow.py                    # 设备授权登录
 ├── replicate.py                    # Amazon Q 请求复刻
+├── amazonq_auto_register.py        # ⭐ 自动注册脚本
+├── 批量注册.py                     # ⭐ 批量注册脚本
+├── 开始注册.bat                    # ⭐ 启动单个注册
+├── 批量注册.bat                    # ⭐ 启动批量注册
 ├── requirements.txt                # Python 依赖
-├── .env.example                    # 环境变量示例
-├── .gitignore                      # Git 忽略规则
 ├── data.sqlite3                    # SQLite 数据库（自动创建）
 ├── frontend/
 │   └── index.html                  # Web 控制台
-└── templates/
-    └── streaming_request.json      # 请求模板
+├── templates/
+│   └── streaming_request.json      # 请求模板
+└── screenshots/                    # 自动截图目录
 ```
 
 ## 🛠️ 技术栈
@@ -292,6 +380,51 @@ CREATE TABLE accounts (
 ### 其他
 - `GET /` - Web 控制台
 - `GET /healthz` - 健康检查
+
+## 📊 完整使用流程
+
+### 场景一：启动账号管理服务
+
+```bash
+# 1. 安装依赖
+pip install -r requirements.txt
+
+# 2. 启动 API 服务
+python -m uvicorn app:app --host 0.0.0.0 --port 8000
+
+# 3. 访问 Web 控制台
+浏览器打开：http://localhost:8000
+```
+
+### 场景二：全自动注册账号
+
+**方式 A：命令行（推荐）**
+```bash
+# 安装自动注册依赖
+pip install DrissionPage requests
+
+# 单个注册
+双击：开始注册.bat
+# 或运行：python amazonq_auto_register.py
+
+# 批量注册（5个）
+双击：批量注册.bat
+# 或运行：python 批量注册.py
+```
+
+**方式 B：Web 界面**
+1. 访问 http://localhost:8000
+2. 找到"⭐ 全自动注册（一键完成）"区域
+3. 点击"🚀 启动全自动注册"按钮
+4. 等待完成（Chrome 会自动打开并完成注册）
+
+### 场景三：手动 URL 登录
+
+1. 访问 http://localhost:8000
+2. 找到"URL 登录（5分钟超时）"
+3. 点击"开始登录"
+4. 在浏览器中完成登录
+5. 点击"等待授权并创建账号"
 
 ## 📄 许可证
 

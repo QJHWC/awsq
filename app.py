@@ -641,3 +641,62 @@ def index():
 @app.get("/healthz")
 def health():
     return {"status": "ok"}
+
+# ------------------------------------------------------------------------------
+# Auto Register (全自动注册)
+# ------------------------------------------------------------------------------
+
+@app.post("/v2/auto-register/start")
+def auto_register_start():
+    """
+    启动全自动注册流程
+    调用 Python 自动注册脚本
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+    
+    try:
+        # 获取脚本路径
+        script_path = BASE_DIR / "amazonq_auto_register.py"
+        
+        if not script_path.exists():
+            raise HTTPException(status_code=404, detail="自动注册脚本未找到")
+        
+        # 启动 Python 脚本（后台运行）
+        # 注意：这会阻塞 API 请求，实际应该使用异步任务队列
+        result = subprocess.run(
+            [sys.executable, str(script_path)],
+            cwd=str(BASE_DIR),
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10分钟超时
+            input="\n"  # 自动按回车
+        )
+        
+        # 简单检查是否成功（通过输出判断）
+        output = result.stdout + result.stderr
+        
+        if "注册成功" in output or "Registration successful" in output:
+            # 尝试从输出中提取邮箱和账号ID
+            import re
+            email_match = re.search(r'邮箱[:：]\s*([^\s]+@[^\s]+)', output)
+            id_match = re.search(r'账号ID[:：]\s*([a-f0-9-]+)', output)
+            
+            return {
+                "success": True,
+                "email": email_match.group(1) if email_match else "unknown",
+                "account_id": id_match.group(1) if id_match else "unknown",
+                "message": "自动注册成功"
+            }
+        else:
+            return {
+                "success": False,
+                "error": "注册过程未完成或失败",
+                "output": output[-500:]  # 最后500字符
+            }
+    
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=408, detail="自动注册超时（10分钟）")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"启动自动注册失败: {str(e)}")

@@ -267,6 +267,15 @@
           <label>登录信息</label>
           <pre class="code mono" id="auth_info">尚未开始</pre>
         </div>
+        <div class="sep"></div>
+        <h3>⭐ 全自动注册（一键完成）</h3>
+        <div class="row">
+          <button class="btn-warn" onclick="startAutoRegister()">🚀 启动全自动注册</button>
+        </div>
+        <div class="field">
+          <label>自动注册状态</label>
+          <pre class="code mono" id="auto_register_info">点击上面按钮启动全自动注册（Chrome无痕模式）</pre>
+        </div>
       </div>
 
       <div class="panel">
@@ -274,7 +283,7 @@
         <div class="row">
           <div class="field" style="max-width:300px">
             <label>model</label>
-            <input id="model" value="claude-sonnet-4" />
+            <input id="model" value="claude-sonnet-4.5" />
           </div>
           <div class="field" style="max-width:180px">
             <label>是否流式</label>
@@ -552,7 +561,7 @@ async function refreshAccount(id){
 
  async function claimAuth(){
    if (!currentAuth || !currentAuth.authId) {
-     document.getElementById('auth_info').textContent = '请先点击“开始登录”。';
+     document.getElementById('auth_info').textContent = '请先点击"开始登录"。';
      return;
    }
    document.getElementById('auth_info').textContent += '\\n\\n正在等待授权并创建账号（最多5分钟）...';
@@ -565,6 +574,50 @@ async function refreshAccount(id){
      await loadAccounts();
    } catch(e){
      document.getElementById('auth_info').textContent += '\\n失败：' + e;
+   }
+ }
+
+ // 全自动注册
+ async function startAutoRegister(){
+   const infoEl = document.getElementById('auto_register_info');
+   infoEl.textContent = '正在启动全自动注册...\\n\\n⏳ 请稍候，Python脚本将打开Chrome无痕浏览器...';
+   
+   try {
+     const r = await fetch(api('/v2/auto-register/start'), { 
+       method: 'POST',
+       headers: { 'content-type': 'application/json' },
+       body: JSON.stringify({})
+     });
+     
+     if (!r.ok) {
+       const err = await r.text();
+       infoEl.textContent = '启动失败：\\n' + err;
+       return;
+     }
+     
+     const result = await r.json();
+     
+     if (result.success) {
+       infoEl.textContent = '✅ 自动注册成功！\\n\\n' + 
+         '邮箱: ' + result.email + '\\n' +
+         '账号ID: ' + result.account_id + '\\n' +
+         '状态: 已启用\\n\\n' +
+         '账号已自动添加到列表！';
+       
+       // 刷新账号列表
+       await loadAccounts();
+     } else {
+       infoEl.textContent = '❌ 注册失败：\\n' + (result.error || '未知错误') + '\\n\\n' +
+         '提示：请检查Python脚本是否正常运行\\n' +
+         '或直接运行：开始注册.bat';
+     }
+   } catch(e){
+     infoEl.textContent = '❌ 错误：' + e + '\\n\\n' +
+       '可能原因：\\n' +
+       '1. Python自动注册脚本未安装依赖（DrissionPage）\\n' +
+       '2. Chrome浏览器未安装\\n' +
+       '3. 邮箱API不可用\\n\\n' +
+       '建议：直接运行 开始注册.bat 进行注册';
    }
  }
 

@@ -4,10 +4,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-venv/
-.venv/
-ENV/
 build/
 develop-eggs/
 dist/
@@ -23,14 +19,13 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Environment
-.env
-*.log
-
-# Database
-*.sqlite3
-*.db
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
 
 # IDE
 .vscode/
@@ -38,7 +33,40 @@ wheels/
 *.swp
 *.swo
 *~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Database
+data.sqlite3
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# Screenshots
+screenshots/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
 
 # OS
-.DS_Store
 Thumbs.db
+.DS_Store
+
+# Backup files
+*.bak
+*.backup
+
+# Chrome
+ChromeData/
+chrome_data/
