@@ -137,19 +137,37 @@ def _list_enabled_accounts(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
 def resolve_account_for_key(bearer_key: Optional[str]) -> Dict[str, Any]:
     """
     Authorize request by OPENAI_KEYS (if configured), then select an AWS account.
-    Selection strategy: random among all enabled accounts. Authorization key does NOT map to any account.
+    Selection strategy: 
+    1. If PREFERRED_ACCOUNT_ID env is set and that account is enabled, use it
+    2. Otherwise, random among all enabled accounts
+    Authorization key does NOT map to any account.
     """
     # Authorization
     if ALLOWED_API_KEYS:
         if not bearer_key or bearer_key not in ALLOWED_API_KEYS:
             raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
-    # Selection: random among enabled accounts
+    # Selection: prefer specified account, fallback to random
     with _conn() as conn:
+        # 检查是否配置了首选账号
+        preferred_id = os.getenv("PREFERRED_ACCOUNT_ID", "").strip()
+        
+        if preferred_id:
+            # 尝试获取首选账号
+            row = conn.execute("SELECT * FROM accounts WHERE id=? AND enabled=1", (preferred_id,)).fetchone()
+            if row:
+                print(f"使用首选账号: {preferred_id}")
+                return _row_to_dict(row)
+            else:
+                print(f"首选账号 {preferred_id} 不可用，使用随机选择")
+        
+        # 回退到随机选择
         candidates = _list_enabled_accounts(conn)
         if not candidates:
             raise HTTPException(status_code=401, detail="No enabled account available")
-        return random.choice(candidates)
+        selected = random.choice(candidates)
+        print(f"随机选择账号: {selected.get('id', 'unknown')}")
+        return selected
 
 # ------------------------------------------------------------------------------
 # Pydantic Schemas
@@ -261,7 +279,27 @@ def get_account(account_id: str) -> Dict[str, Any]:
 # Dependencies
 # ------------------------------------------------------------------------------
 
-def require_account(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+def require_account(
+    authorization: Optional[str] = Header(default=None),
+    x_account_id: Optional[str] = Header(default=None)
+) -> Dict[str, Any]:
+    """
+    获取账号用于请求
+    - 如果提供了 X-Account-ID 请求头，尝试使用指定的账号
+    - 否则使用默认的账号选择策略（首选或随机）
+    """
+    # 如果指定了账号ID，尝试使用该账号
+    if x_account_id:
+        with _conn() as conn:
+            # 支持通过ID或邮箱（label）查找
+            row = conn.execute("SELECT * FROM accounts WHERE (id=? OR label=?) AND enabled=1", (x_account_id, x_account_id)).fetchone()
+            if row:
+                print(f"使用指定账号: {x_account_id}")
+                return _row_to_dict(row)
+            else:
+                print(f"指定账号 {x_account_id} 不可用或未启用，使用默认策略")
+    
+    # 默认策略
     bearer = _extract_bearer(authorization)
     return resolve_account_for_key(bearer)
 
@@ -621,6 +659,83 @@ def update_account(account_id: str, body: AccountUpdate):
 def manual_refresh(account_id: str):
     return refresh_access_token_in_db(account_id)
 
+@app.post("/v2/accounts/check-health")
+def check_accounts_health():
+    """
+    检查所有启用账号的健康状态，自动删除被封禁的账号
+    """
+    AWS_CHAT_URL = "https://qchat.aws.amazon.com/api/2023-11-27/conversations"
+    
+    with _conn() as conn:
+        rows = conn.execute("SELECT id, label, accessToken FROM accounts WHERE enabled=1").fetchall()
+        
+        if not rows:
+            return {"checked": 0, "healthy": 0, "deleted": 0, "accounts": []}
+        
+        results = []
+        deleted_ids = []
+        healthy_count = 0
+        
+        for row in rows:
+            acc_id = row[0]
+            label = row[1]
+            access_token = row[2]
+            
+            if not access_token:
+                results.append({"id": acc_id, "label": label, "status": "skipped", "reason": "无access token"})
+                continue
+            
+            # 测试账号健康度
+            try:
+                payload = {
+                    "conversationState": {
+                        "currentMessage": {"userInputMessage": {"content": "test"}},
+                        "chatTriggerType": "MANUAL"
+                    }
+                }
+                
+                headers = {
+                    "content-type": "application/json",
+                    "authorization": f"Bearer {access_token}",
+                    "x-amzn-codewhisperer-optout": "true"
+                }
+                
+                resp = requests.post(AWS_CHAT_URL, headers=headers, json=payload, timeout=(5, 10))
+                
+                if resp.status_code == 200:
+                    results.append({"id": acc_id, "label": label, "status": "healthy", "reason": None})
+                    healthy_count += 1
+                else:
+                    # 检查是否被暂停
+                    try:
+                        err = resp.json()
+                        reason = err.get('reason', '')
+                        error_type = err.get('__type', '')
+                        
+                        if 'SUSPENDED' in reason or 'SUSPENDED' in error_type:
+                            # 删除被暂停的账号
+                            conn.execute("DELETE FROM accounts WHERE id=?", (acc_id,))
+                            conn.commit()
+                            deleted_ids.append(acc_id)
+                            results.append({"id": acc_id, "label": label, "status": "deleted", "reason": f"账号被暂停: {reason}"})
+                        else:
+                            results.append({"id": acc_id, "label": label, "status": "error", "reason": f"HTTP {resp.status_code}"})
+                    except:
+                        results.append({"id": acc_id, "label": label, "status": "error", "reason": f"HTTP {resp.status_code}"})
+                        
+            except requests.Timeout:
+                results.append({"id": acc_id, "label": label, "status": "timeout", "reason": "请求超时"})
+            except Exception as e:
+                results.append({"id": acc_id, "label": label, "status": "error", "reason": str(e)})
+        
+        return {
+            "checked": len(rows),
+            "healthy": healthy_count,
+            "deleted": len(deleted_ids),
+            "deleted_ids": deleted_ids,
+            "accounts": results
+        }
+
 # ------------------------------------------------------------------------------
 # Simple Frontend (minimal dev test page; full UI in v2/frontend/index.html)
 # ------------------------------------------------------------------------------
@@ -646,57 +761,88 @@ def health():
 # Auto Register (全自动注册)
 # ------------------------------------------------------------------------------
 
+class AutoRegisterMode(BaseModel):
+    mode: Optional[str] = "headful"  # headful/headless
+
 @app.post("/v2/auto-register/start")
-def auto_register_start():
+def auto_register_start(body: AutoRegisterMode):
     """
-    启动全自动注册流程
-    调用 Python 自动注册脚本
+    自动注册流程 - 仅本地环境使用
+    - headful: 有头浏览器自动完成 - 弹出Chrome窗口，可见操作过程
+    - headless: 无头浏览器自动完成 - 后台运行，不显示窗口
     """
     import subprocess
     import sys
-    from pathlib import Path
+    
+    mode = body.mode or "headful"
+    
+    if mode not in ["headful", "headless"]:
+        return {"success": False, "error": f"不支持的模式: {mode}，仅支持 headful 或 headless"}
     
     try:
-        # 获取脚本路径
         script_path = BASE_DIR / "amazonq_auto_register.py"
         
         if not script_path.exists():
-            raise HTTPException(status_code=404, detail="自动注册脚本未找到")
+            return {
+                "success": False,
+                "error": "自动注册脚本未找到",
+                "message": "请确保 amazonq_auto_register.py 脚本存在于项目目录"
+            }
         
-        # 启动 Python 脚本（后台运行）
-        # 注意：这会阻塞 API 请求，实际应该使用异步任务队列
+        # 准备环境变量
+        env = os.environ.copy()
+        env["HEADLESS"] = "1" if mode == "headless" else "0"
+        
+        mode_name = "无头" if mode == "headless" else "有头"
+        print(f"启动{mode_name}浏览器自动注册...")
+        
+        # 启动Python脚本（指定UTF-8编码避免Windows GBK问题）
         result = subprocess.run(
             [sys.executable, str(script_path)],
             cwd=str(BASE_DIR),
             capture_output=True,
             text=True,
+            encoding='utf-8',  # 明确指定UTF-8编码
+            errors='replace',  # 遇到无法解码的字符用替换符
             timeout=600,  # 10分钟超时
-            input="\n"  # 自动按回车
+            input="\n",  # 自动按回车
+            env=env
         )
         
-        # 简单检查是否成功（通过输出判断）
-        output = result.stdout + result.stderr
+        # 安全合并stdout和stderr
+        output = (result.stdout or "") + (result.stderr or "")
+        if output:
+            print(f"脚本输出:\n{output}")
+        else:
+            print("脚本执行完成（无输出）")
         
+        # 解析输出
         if "注册成功" in output or "Registration successful" in output:
-            # 尝试从输出中提取邮箱和账号ID
             import re
             email_match = re.search(r'邮箱[:：]\s*([^\s]+@[^\s]+)', output)
             id_match = re.search(r'账号ID[:：]\s*([a-f0-9-]+)', output)
             
             return {
                 "success": True,
+                "mode": mode,
                 "email": email_match.group(1) if email_match else "unknown",
                 "account_id": id_match.group(1) if id_match else "unknown",
-                "message": "自动注册成功"
+                "message": f"{mode_name}浏览器自动注册成功！"
             }
         else:
             return {
                 "success": False,
+                "mode": mode,
                 "error": "注册过程未完成或失败",
-                "output": output[-500:]  # 最后500字符
+                "output": output[-1000:] if output else "无输出"
             }
     
     except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=408, detail="自动注册超时（10分钟）")
+        return {"success": False, "error": "自动注册超时（10分钟）"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"启动自动注册失败: {str(e)}")
+        import traceback
+        return {
+            "success": False, 
+            "error": f"启动自动注册失败: {str(e)}",
+            "traceback": traceback.format_exc()
+        }

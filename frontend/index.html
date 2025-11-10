@@ -213,7 +213,12 @@
       <div class="panel">
         <h2>账号管理</h2>
         <div class="row">
-          <button class="btn-secondary" onclick="loadAccounts()">刷新列表</button>
+          <button class="btn-secondary" onclick="loadAccounts()">🔄 刷新列表</button>
+          <button class="btn-warn" onclick="checkAccountsHealth()">🛡️ 检测黑号（自动删除）</button>
+        </div>
+        <div class="field" id="health_check_result" style="display:none">
+          <label>检测结果</label>
+          <pre class="code mono" id="health_check_info"></pre>
         </div>
         <div class="list" id="accounts"></div>
         <div class="sep"></div>
@@ -268,13 +273,14 @@
           <pre class="code mono" id="auth_info">尚未开始</pre>
         </div>
         <div class="sep"></div>
-        <h3>⭐ 全自动注册（一键完成）</h3>
+        <h3>⭐ 全自动注册（一键完成 - 仅本地环境）</h3>
         <div class="row">
-          <button class="btn-warn" onclick="startAutoRegister()">🚀 启动全自动注册</button>
+          <button class="btn-warn" onclick="startAutoRegister('headful')" title="自动模式：自动打开Chrome浏览器窗口，全自动完成所有步骤">🤖 自动模式（全自动）</button>
+          <button class="btn-warn" onclick="startAutoRegister('headless')" title="手动模式：打开浏览器到授权页面，需要手动输入信息">🖐️ 手动模式（手动输入）</button>
         </div>
         <div class="field">
-          <label>自动注册状态</label>
-          <pre class="code mono" id="auto_register_info">点击上面按钮启动全自动注册（Chrome无痕模式）</pre>
+          <label>注册状态</label>
+          <pre class="code mono" id="auto_register_info">选择上方模式启动注册：\n• 🤖 自动模式：全自动完成（推荐）\n• 🖐️ 手动模式：浏览器打开，手动输入每一步\n\n注意：需要安装 DrissionPage 依赖</pre>
         </div>
       </div>
 
@@ -293,6 +299,13 @@
             </select>
           </div>
           <button class="right" onclick="send()">发送请求</button>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>🔒 锁定账号测试（可选 - 输入账号ID或邮箱）</label>
+            <input id="locked_account" placeholder="留空=随机选择 | 输入完整账号ID或邮箱地址锁定使用特定账号" />
+          </div>
+          <button class="btn-secondary" onclick="document.getElementById('locked_account').value = ''">🔓 解除锁定</button>
         </div>
         <div class="field">
           <label>messages（JSON）</label>
@@ -463,6 +476,75 @@ async function loadAccounts(){
   }
 }
 
+async function checkAccountsHealth(){
+  const resultDiv = document.getElementById('health_check_result');
+  const infoEl = document.getElementById('health_check_info');
+  
+  resultDiv.style.display = 'block';
+  infoEl.textContent = '🔍 正在检测所有账号健康状态...\\n\\n⏳ 请稍候...';
+  
+  try {
+    const r = await fetch(api('/v2/accounts/check-health'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' }
+    });
+    
+    if (!r.ok) {
+      const err = await r.text();
+      infoEl.textContent = '❌ 检测失败：\\n' + err;
+      return;
+    }
+    
+    const result = await r.json();
+    
+    // 显示检测结果
+    let output = '✅ 检测完成\\n\\n';
+    output += `📊 统计信息：\\n`;
+    output += `   检测账号数: ${result.checked}\\n`;
+    output += `   健康账号: ${result.healthy} ✅\\n`;
+    output += `   删除黑号: ${result.deleted} 🗑️\\n\\n`;
+    
+    if (result.accounts && result.accounts.length > 0) {
+      output += '📋 详细结果：\\n\\n';
+      
+      result.accounts.forEach((acc, i) => {
+        const label = acc.label || acc.id.substring(0, 20);
+        output += `${i + 1}. ${label}\\n`;
+        
+        if (acc.status === 'healthy') {
+          output += '   状态: ✅ 健康\\n';
+        } else if (acc.status === 'deleted') {
+          output += '   状态: 🗑️ 已删除（黑号）\\n';
+          output += `   原因: ${acc.reason}\\n`;
+        } else if (acc.status === 'skipped') {
+          output += '   状态: ⏭️ 跳过\\n';
+          output += `   原因: ${acc.reason}\\n`;
+        } else if (acc.status === 'timeout') {
+          output += '   状态: ⏰ 超时\\n';
+        } else if (acc.status === 'error') {
+          output += '   状态: ⚠️ 错误\\n';
+          output += `   原因: ${acc.reason}\\n`;
+        }
+        output += '\\n';
+      });
+    }
+    
+    if (result.deleted > 0) {
+      output += `\\n🎯 已自动删除 ${result.deleted} 个被封禁账号`;
+    }
+    
+    infoEl.textContent = output;
+    
+    // 刷新账号列表
+    if (result.deleted > 0 || result.checked > 0) {
+      await loadAccounts();
+    }
+    
+  } catch(e) {
+    infoEl.textContent = '❌ 检测错误：' + e;
+  }
+}
+
 async function createAccount(){
   const body = {
     label: document.getElementById('new_label').value.trim() || null,
@@ -577,55 +659,77 @@ async function refreshAccount(id){
    }
  }
 
- // 全自动注册
- async function startAutoRegister(){
-   const infoEl = document.getElementById('auto_register_info');
-   infoEl.textContent = '正在启动全自动注册...\\n\\n⏳ 请稍候，Python脚本将打开Chrome无痕浏览器...';
-   
-   try {
-     const r = await fetch(api('/v2/auto-register/start'), { 
-       method: 'POST',
-       headers: { 'content-type': 'application/json' },
-       body: JSON.stringify({})
-     });
-     
-     if (!r.ok) {
-       const err = await r.text();
-       infoEl.textContent = '启动失败：\\n' + err;
-       return;
-     }
-     
-     const result = await r.json();
-     
-     if (result.success) {
-       infoEl.textContent = '✅ 自动注册成功！\\n\\n' + 
-         '邮箱: ' + result.email + '\\n' +
-         '账号ID: ' + result.account_id + '\\n' +
-         '状态: 已启用\\n\\n' +
-         '账号已自动添加到列表！';
-       
-       // 刷新账号列表
-       await loadAccounts();
-     } else {
-       infoEl.textContent = '❌ 注册失败：\\n' + (result.error || '未知错误') + '\\n\\n' +
-         '提示：请检查Python脚本是否正常运行\\n' +
-         '或直接运行：开始注册.bat';
-     }
-   } catch(e){
-     infoEl.textContent = '❌ 错误：' + e + '\\n\\n' +
-       '可能原因：\\n' +
-       '1. Python自动注册脚本未安装依赖（DrissionPage）\\n' +
-       '2. Chrome浏览器未安装\\n' +
-       '3. 邮箱API不可用\\n\\n' +
-       '建议：直接运行 开始注册.bat 进行注册';
-   }
- }
+// 全自动注册（仅本地 - 两种模式）
+async function startAutoRegister(mode = 'headful'){
+  const infoEl = document.getElementById('auto_register_info');
+  
+  const modeNames = {
+    'headful': '自动模式',
+    'headless': '手动模式'
+  };
+  
+  infoEl.textContent = `🚀 正在启动${modeNames[mode] || mode}...\\n\\n⏳ 请稍候，脚本正在运行...\\n\\n` +
+    (mode === 'headful' ? '💡 Chrome浏览器即将弹出，全自动完成...' : '💡 Chrome浏览器即将打开，请手动完成授权...');
+  
+  try {
+    const r = await fetch(api('/v2/auto-register/start'), { 
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: mode })
+    });
+    
+    if (!r.ok) {
+      const err = await r.text();
+      infoEl.textContent = '❌ 启动失败：\\n' + err;
+      return;
+    }
+    
+    const result = await r.json();
+    
+    if (result.success && result.email) {
+      // 注册成功
+      const modeName = result.mode === 'headful' ? '自动模式' : '手动模式';
+      infoEl.textContent = '🎉 ' + modeName + '注册成功！\\n\\n' + 
+        '邮箱: ' + result.email + '\\n' +
+        '账号ID: ' + result.account_id + '\\n' +
+        '模式: ' + modeName + '\\n' +
+        '状态: ✅ 已启用\\n\\n' +
+        '正在刷新账号列表...';
+      
+      // 强制刷新账号列表（多次尝试）
+      await loadAccounts();
+      setTimeout(() => loadAccounts(), 1000);  // 1秒后再刷新一次
+      setTimeout(() => loadAccounts(), 3000);  // 3秒后再刷新一次
+      
+      // 更新提示
+      setTimeout(() => {
+        infoEl.textContent = '🎉 ' + modeName + '注册成功！\\n\\n' + 
+          '邮箱: ' + result.email + '\\n' +
+          '账号ID: ' + result.account_id + '\\n' +
+          '状态: ✅ 已启用\\n\\n' +
+          '✅ 账号已添加到列表！';
+      }, 3000);
+    } else if (result.success) {
+      // 成功但格式异常，尝试刷新列表
+      infoEl.textContent = '⚠️ 返回数据异常，但尝试刷新列表：\\n' + JSON.stringify(result, null, 2);
+      await loadAccounts();
+    } else {
+      // 失败
+      infoEl.textContent = '❌ 注册失败：\\n' + (result.error || '未知错误') + 
+        (result.output ? '\\n\\n详细输出：\\n' + result.output : '') +
+        (result.traceback ? '\\n\\n错误追踪：\\n' + result.traceback : '');
+    }
+  } catch(e){
+    infoEl.textContent = '❌ 请求错误：' + e + '\\n\\n请确保服务正在运行';
+  }
+}
 
 async function send() {
   const base = baseUrl();
   const auth = authHeader();
   const model = document.getElementById('model').value.trim();
   const stream = document.getElementById('stream').value === 'true';
+  const lockedAccount = document.getElementById('locked_account').value.trim();
   const out = document.getElementById('out');
   out.textContent = '';
 
@@ -637,6 +741,14 @@ async function send() {
 
   const headers = { 'content-type': 'application/json' };
   if (auth) headers['authorization'] = auth;
+  
+  // 如果锁定了账号，添加自定义请求头
+  if (lockedAccount) {
+    headers['x-account-id'] = lockedAccount;
+    console.log('🔒 使用锁定账号:', lockedAccount);
+  } else {
+    console.log('🎲 使用随机账号选择');
+  }
 
   if (!stream) {
     const r = await fetch(api('/v1/chat/completions'), {

@@ -1,0 +1,309 @@
+========================================
+  Docker 镜像构建和推送指南
+========================================
+
+【目标】
+将项目构建成 Docker 镜像并推送到 Docker Hub
+镜像地址: https://hub.docker.com/r/qjhwc/awsq
+
+
+========================================
+  前置准备
+========================================
+
+1. 安装 Docker Desktop
+   下载地址: https://www.docker.com/products/docker-desktop/
+   
+   Windows 要求:
+   - Windows 10/11 64位
+   - 启用 WSL 2（Windows Subsystem for Linux）
+   - 至少 4GB 内存
+
+2. 注册 Docker Hub 账号
+   注册地址: https://hub.docker.com/signup
+   
+   记住你的:
+   - 用户名 (例如: qjhwc)
+   - 密码
+
+3. 启动 Docker Desktop
+   安装后打开 Docker Desktop，等待启动完成
+   看到托盘图标显示 "Docker Desktop is running"
+
+
+========================================
+  方式一：一键构建推送（推荐）⭐
+========================================
+
+双击运行: 构建并推送Docker镜像.bat
+
+脚本会自动:
+✓ 检查 Docker 是否安装
+✓ 检查 Docker 是否运行
+✓ 登录 Docker Hub（需要输入用户名和密码）
+✓ 构建镜像 qjhwc/awsq:latest
+✓ 推送到 Docker Hub
+
+预计耗时: 5-10 分钟（首次构建）
+
+
+========================================
+  方式二：手动命令行操作
+========================================
+
+【步骤 1】打开 PowerShell 或 CMD
+
+cd C:\Users\QJHWC\Desktop\2api\amazonq2api
+
+
+【步骤 2】登录 Docker Hub
+
+docker login
+
+输入:
+Username: qjhwc
+Password: 你的密码
+
+
+【步骤 3】构建镜像
+
+docker build -t qjhwc/awsq:latest .
+
+说明:
+- -t qjhwc/awsq:latest  指定镜像名称和标签
+- .  表示使用当前目录的 Dockerfile
+
+
+【步骤 4】推送到 Docker Hub
+
+docker push qjhwc/awsq:latest
+
+
+【步骤 5】验证
+
+访问: https://hub.docker.com/r/qjhwc/awsq
+应该能看到你的镜像
+
+
+========================================
+  构建过程说明
+========================================
+
+构建时 Docker 会:
+
+1. 基于 python:3.10-slim 创建基础环境
+2. 安装系统依赖（gcc 等）
+3. 复制 requirements.txt
+4. 安装 Python 依赖
+5. 复制所有项目文件
+6. 设置启动命令
+
+输出示例:
+[+] Building 120.5s (12/12) FINISHED
+ => [1/7] FROM python:3.10-slim
+ => [2/7] WORKDIR /app
+ => [3/7] COPY requirements.txt .
+ => [4/7] RUN pip install --no-cache-dir -r requirements.txt
+ => [5/7] COPY . .
+ => [6/7] EXPOSE 8000
+ => [7/7] CMD ["python", "-m", "uvicorn", ...]
+ => exporting to image
+ => => naming to docker.io/qjhwc/awsq:latest
+
+
+========================================
+  推送过程说明
+========================================
+
+推送时会显示:
+
+The push refers to repository [docker.io/qjhwc/awsq]
+a1b2c3d4e5f6: Preparing
+1a2b3c4d5e6f: Preparing
+...
+a1b2c3d4e5f6: Pushed
+1a2b3c4d5e6f: Pushed
+latest: digest: sha256:xxx size: 1234
+
+
+========================================
+  常见问题
+========================================
+
+Q: 提示 "docker: command not found"
+A: Docker 未安装或未添加到 PATH
+   解决: 安装 Docker Desktop 并重启终端
+
+Q: 提示 "Cannot connect to the Docker daemon"
+A: Docker Desktop 未运行
+   解决: 启动 Docker Desktop
+
+Q: 登录失败 "unauthorized: incorrect username or password"
+A: 用户名或密码错误
+   解决: 
+   1. 确认用户名（不是邮箱）
+   2. 如果忘记密码，访问 https://hub.docker.com/reset-password/
+
+Q: 构建失败 "failed to solve with frontend dockerfile.v0"
+A: Dockerfile 或依赖有问题
+   解决: 检查 Dockerfile 语法和 requirements.txt
+
+Q: 推送失败 "denied: requested access to the resource is denied"
+A: 没有推送权限或仓库名称错误
+   解决:
+   1. 确认已登录: docker login
+   2. 确认镜像名称格式: 用户名/仓库名:标签
+
+Q: 推送很慢或超时
+A: 网络问题
+   解决:
+   1. 使用代理或 VPN
+   2. 切换到更好的网络
+   3. 多次尝试
+
+Q: 构建时提示找不到文件
+A: 文件被 .gitignore 排除
+   解决: 检查 .gitignore，确保必要文件未被排除
+
+
+========================================
+  镜像使用方法
+========================================
+
+【本地测试运行】
+
+docker run -d \
+  --name awsq \
+  -p 8000:8000 \
+  -e OPENAI_KEYS=sk-790214 \
+  qjhwc/awsq:latest
+
+访问: http://localhost:8000
+
+
+【查看日志】
+
+docker logs -f awsq
+
+
+【停止容器】
+
+docker stop awsq
+
+
+【删除容器】
+
+docker rm awsq
+
+
+【claw.cloud 部署】
+
+Application Name: awsq
+Image: qjhwc/awsq:latest  ← 直接填这个
+Image Type: Public
+Container Port: 8000
+Public Access: ON
+Environment Variables:
+  OPENAI_KEYS: sk-790214
+
+
+========================================
+  镜像管理
+========================================
+
+【查看本地镜像】
+
+docker images
+
+
+【删除本地镜像】
+
+docker rmi qjhwc/awsq:latest
+
+
+【拉取镜像】
+
+docker pull qjhwc/awsq:latest
+
+
+【重新构建（不使用缓存）】
+
+docker build --no-cache -t qjhwc/awsq:latest .
+
+
+【构建多个标签】
+
+docker build -t qjhwc/awsq:latest -t qjhwc/awsq:v1.0 .
+docker push qjhwc/awsq:latest
+docker push qjhwc/awsq:v1.0
+
+
+========================================
+  进阶：使用 docker-compose
+========================================
+
+已提供 docker-compose.yml 文件
+
+【启动服务】
+
+docker-compose up -d
+
+
+【查看日志】
+
+docker-compose logs -f
+
+
+【停止服务】
+
+docker-compose down
+
+
+【重新构建并启动】
+
+docker-compose up -d --build
+
+
+========================================
+  Docker Hub 仓库管理
+========================================
+
+访问: https://hub.docker.com/r/qjhwc/awsq
+
+可以:
+- 查看镜像详情
+- 查看标签列表
+- 编辑仓库描述
+- 设置为私有（付费功能）
+- 删除标签或整个仓库
+
+
+========================================
+  推送完成后的步骤
+========================================
+
+1. ✅ 访问 Docker Hub 验证镜像已上传
+   https://hub.docker.com/r/qjhwc/awsq
+
+2. ✅ 在 claw.cloud 配置
+   Image Name: qjhwc/awsq:latest
+
+3. ✅ 部署并测试
+
+4. ✅ 使用公网地址访问你的 API
+
+
+========================================
+  总结
+========================================
+
+完整流程:
+1. 安装 Docker Desktop
+2. 注册 Docker Hub 账号
+3. 双击运行: 构建并推送Docker镜像.bat
+4. 等待构建和推送完成（5-10分钟）
+5. 在 claw.cloud 使用 qjhwc/awsq:latest
+6. 部署成功！
+
+现在你的项目就可以在任何支持 Docker 的平台上运行了！
+

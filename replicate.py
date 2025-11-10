@@ -188,7 +188,7 @@ def send_chat_request(access_token: str, messages: List[Dict[str, Any]], model: 
     payload_str = json.dumps(body_json, ensure_ascii=False)
     headers = _merge_headers(headers_from_log, access_token)
     session = requests.Session()
-    resp = session.post(url, headers=headers, data=payload_str, stream=True, timeout=timeout)
+    resp = session.post(url, headers=headers, data=payload_str.encode('utf-8'), stream=True, timeout=timeout)
     if resp.status_code >= 400:
         try:
             err = resp.text
